@@ -2,11 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   build:
@@ -15,74 +13,89 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: Set up Docker Buildx
+      - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v2
 
       - name: Login to Docker Hub
-        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+        run: |
+          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      - name: Build Docker Image
+      - name: Build and Push Docker Image
         run: |
           docker build -t ${{ secrets.DOCKER_USERNAME }}/my-app:latest .
           docker tag ${{ secrets.DOCKER_USERNAME }}/my-app:latest ${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}
-
-      - name: Push Docker Image to Docker Hub
-        if: github.event_name == 'push'
-        run: |
-          docker push ${{ secrets.DOCKER_USERNAME }}/my-app:latest
-          docker push ${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}
+          
+          # Push only for main branch commits
+          if [ "$GITHUB_REF" == "refs/heads/main" ]; then
+            docker push ${{ secrets.DOCKER_USERNAME }}/my-app:latest
+            docker push ${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}
+          fi
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Update Image Tag in Kubernetes Manifest
+      - name: Update K8s Manifest
         run: |
           sed -i "s|image: .*/my-app:.*|image: ${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}|" k8s/deployment.yaml
 
-      - name: Commit and Push Changes
+      - name: Commit Manifest Changes
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-
-          # 🔹 FIX: Stash unstaged changes before pulling
-          git stash
-
-          git pull --rebase origin main  # Ensure local repo is up-to-date
-
-          # 🔹 FIX: Apply stashed changes after pulling
-          git stash pop || echo "No stash to apply"
-
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
           git add k8s/deployment.yaml
-          git commit -m "Update deployment.yaml with new image tag: ${{ github.sha }}" || echo "No changes to commit"
+          git commit -m "Update image to ${{ github.sha }}" || echo "No changes to commit"
           git push origin main
 
-      - name: Configure Custom SSH Key
+      - name: Prepare SSH Key
         run: |
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > my-ec2-key
+          # Convert SSH key to UNIX format
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > my-ec2-key
           chmod 600 my-ec2-key
 
-      - name: Debug SSH Key
-        run: |
-          echo "Checking SSH Key Format..."
-          ls -lah my-ec2-key
-          file my-ec2-key
-          cat my-ec2-key | head -n 5
-
-      - name: Test SSH Connection
+      - name: ArgoCD Deployment
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ubuntu  # Change to 'ec2-user' for Amazon Linux
+          EC2_USER: ubuntu
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}  # Should be https://host:port
+          ARGOCD_USER: ${{ secrets.ARGOCD_USERNAME }}
+          ARGOCD_PASS: ${{ secrets.ARGOCD_PASSWORD }}
         run: |
-          ssh -vvv -o StrictHostKeyChecking=no -i my-ec2-key $EC2_USER@$EC2_HOST "echo 'SSH Connection Successful'"
+          ssh -i my-ec2-key -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << EOSSH
+          #!/bin/bash
 
-      - name: SSH into EC2 and Deploy with ArgoCD
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ubuntu  # Change to 'ec2-user' for Amazon Linux
-        run: |
-          ssh -o StrictHostKeyChecking=no -i my-ec2-key $EC2_USER@$EC2_HOST "argocd app sync my-app"
+          # Verify network connectivity
+          echo "Testing connection to ArgoCD server..."
+          if ! curl -k -I --connect-timeout 5 \$ARGOCD_SERVER; then
+            echo "ERROR: Cannot reach ArgoCD server at \$ARGOCD_SERVER"
+            exit 1
+          fi
+
+          # Install ArgoCD CLI if missing
+          if ! command -v argocd >/dev/null 2>&1; then
+            echo "Installing ArgoCD CLI..."
+            sudo curl -sSL -o /usr/local/bin/argocd \$ARGOCD_SERVER/download/argocd-linux-amd64
+            sudo chmod +x /usr/local/bin/argocd
+          fi
+
+          # Login with force-confirm and web transport
+          argocd login \$ARGOCD_SERVER \\
+            --username=\$ARGOCD_USER \\
+            --password=\$ARGOCD_PASS \\
+            --insecure \\
+            --grpc-web
+
+          # Force sync application with timeout
+          echo "Starting sync operation..."
+          argocd app sync my-app \\
+            --force \\
+            --timeout 300 \\
+            --retry-limit 5
+
+          # Verify sync status
+          argocd app wait my-app --health
+          EOSSH
