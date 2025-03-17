@@ -63,12 +63,19 @@ jobs:
 
       - name: Configure Custom SSH Key
         run: |
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > my-ec2-key
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | base64 --decode > my-ec2-key
           chmod 600 my-ec2-key
+
+      - name: Debug SSH Key
+        run: |
+          echo "Checking SSH Key Format..."
+          ls -lah my-ec2-key
+          file my-ec2-key
+          cat my-ec2-key | head -n 5
 
       - name: SSH into EC2 and Deploy with ArgoCD
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ubuntu  # Change to 'ec2-user' for Amazon Linux 
+          EC2_USER: ubuntu  # Change to 'ec2-user' for Amazon Linux
         run: |
           ssh -o StrictHostKeyChecking=no -i my-ec2-key $EC2_USER@$EC2_HOST "argocd app sync my-app"
