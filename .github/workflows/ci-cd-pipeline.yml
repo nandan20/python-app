@@ -69,6 +69,6 @@ jobs:
       - name: SSH into EC2 and Deploy with ArgoCD
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ubuntu  # Change to 'ec2-user' for Amazon Linux
+          EC2_USER: ubuntu  # Change to 'ec2-user' for Amazon Linux & 
         run: |
           ssh -o StrictHostKeyChecking=no -i private_key.pem $EC2_USER@$EC2_HOST "argocd app sync my-app"
