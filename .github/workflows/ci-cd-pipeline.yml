@@ -74,27 +74,30 @@ jobs:
           ARGOCD_USER: ${{ secrets.ARGOCD_USERNAME }}
           ARGOCD_PASS: ${{ secrets.ARGOCD_PASSWORD }}
         run: |
-          ssh -i my-ec2-key -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << EOSSH
+          ssh -i my-ec2-key -T -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << EOSSH
           #!/bin/bash
+
+          # Validate environment variables
+          echo "ARGOCD_SERVER: ${ARGOCD_SERVER:?ERROR: ARGOCD_SERVER env var not set}"
 
           # Verify network connectivity
           echo "Testing connection to ArgoCD server..."
-          if ! curl -k -I --connect-timeout 5 \$ARGOCD_SERVER; then
+          if ! curl -k -I --connect-timeout 5 "\$ARGOCD_SERVER"; then
             echo "ERROR: Cannot reach ArgoCD server at \$ARGOCD_SERVER"
             exit 1
           fi
 
           # Install ArgoCD CLI if missing
-          if ! command -v argocd >/dev/null 2>&1; then
-            echo "Installing ArgoCD CLI..."
-            sudo curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-            sudo chmod +x /usr/local/bin/argocd
+          if ! command -v argocd >/dev/null; then
+            curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+            chmod +x argocd
+            sudo mv argocd /usr/local/bin/
           fi
 
           # Login with force-confirm and web transport
-          argocd login \$ARGOCD_SERVER \\
-            --username=\$ARGOCD_USER \\
-            --password=\$ARGOCD_PASS \\
+          argocd login "\$ARGOCD_SERVER" \\
+            --username="\$ARGOCD_USER" \\
+            --password="\$ARGOCD_PASS" \\
             --insecure \\
             --grpc-web
 
