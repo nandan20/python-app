@@ -39,6 +39,9 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
+        with:
+          ref: main  # Ensures the correct branch is checked out
+          fetch-depth: 0  # Ensures full history to handle git operations
 
       - name: Update Image Tag in Kubernetes Manifest
         run: |
@@ -48,16 +51,25 @@ jobs:
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
-          
-          git pull --rebase origin main  # 🔹 Fix added here
-          
-          git add k8s/deployment.yaml
-          git commit -m "Update deployment.yaml with new image tag: ${{ github.sha }}" || echo "No changes to commit"
-          git push origin main
+
+          # Ensure the latest changes are pulled to avoid conflicts
+          git pull --rebase origin main || echo "No changes to rebase"
+
+          # Check for unstaged changes
+          if ! git diff --quiet; then
+            git add k8s/deployment.yaml
+            git commit -m "Update deployment.yaml with new image tag: ${{ github.sha }}"
+            git push origin main
+          else
+            echo "No changes to commit"
+          fi
 
       - name: SSH into EC2 and Deploy with ArgoCD
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ubuntu  # Adjust based on your EC2 OS
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
+          echo "$SSH_PRIVATE_KEY" > private_key.pem
+          chmod 600 private_key.pem
           ssh -o StrictHostKeyChecking=no -i private_key.pem $EC2_USER@$EC2_HOST "argocd app sync my-app"
