@@ -29,7 +29,7 @@ jobs:
           docker push nitishnandan/my-app:latest
           docker push nitishnandan/my-app:${{ github.sha }}
 
-  deploy:
+  update-manifest:
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
@@ -37,18 +37,30 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: Update Image Tag in Kubernetes Manifest
-        run: |
-          sed -i "s|image: nitishnandan/my-app:.*|image: nitishnandan/my-app:${{ github.sha }}|" k8s/deployment.yaml
-
-      - name: Commit and Push Changes
+      - name: Configure Git
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
+
+      - name: Update Image Tag in Kubernetes Manifest
+        run: |
+          sed -i "s|image: nitishnandan/my-app:[a-zA-Z0-9_.-]*|image: nitishnandan/my-app:${{ github.sha }}|" k8s/deployment.yaml
+
+      - name: Debug File Change
+        run: cat k8s/deployment.yaml
+
+      - name: Commit and Push Changes
+        run: |
           git add k8s/deployment.yaml
           git commit -m "Update deployment.yaml with new image tag: ${{ github.sha }}" || echo "No changes to commit"
           git push origin main
 
-      - name: Deploy to Kubernetes using ArgoCD
+  deploy:
+    needs: update-manifest
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - name: Sync with ArgoCD
         run: |
           argocd app sync my-app
+          argocd app wait my-app --health --timeout 180
