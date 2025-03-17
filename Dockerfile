@@ -1,17 +1,19 @@
-# Use official Python image
-FROM python:3.9
-
-# Set working directory
-WORKDIR /app
-
-# Copy application files
-COPY app/ /app/
-
-# Install dependencies
-RUN pip install -r requirements.txt
-
-# Expose port
-EXPOSE 5000
-
-# Run the application
-CMD ["python", "server.py"]
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+        - name: my-app
+          image: nitishnandan/my-app:v2  # Change to v2
+          ports:
+            - containerPort: 5000

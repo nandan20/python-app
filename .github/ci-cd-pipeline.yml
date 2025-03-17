@@ -25,13 +25,29 @@ jobs:
           docker push nitishnandan/my-app:latest
           docker push nitishnandan/my-app:${{ github.sha }}
 
-  deploy:
+  update-manifest:
     needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
+      - name: Update Deployment Manifest with New Image
+        run: |
+          sed -i 's|image: nitishnandan/my-app:.*|image: nitishnandan/my-app:${{ github.sha }}|' k8s/deployment.yaml
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git add k8s/deployment.yaml
+          git commit -m "Update deployment.yaml with new image tag: ${{ github.sha }}"
+          git push origin main
+
+  deploy:
+    needs: update-manifest
+    runs-on: ubuntu-latest
+    steps:
       - name: Deploy to Kubernetes using ArgoCD
         run: |
           argocd app sync my-app
