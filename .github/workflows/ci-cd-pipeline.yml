@@ -61,14 +61,14 @@ jobs:
           git commit -m "Update deployment.yaml with new image tag: ${{ github.sha }}" || echo "No changes to commit"
           git push origin main
 
-      - name: Configure SSH Key
+      - name: Configure Custom SSH Key
         run: |
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > private_key.pem
-          chmod 600 private_key.pem
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > my-ec2-key
+          chmod 600 my-ec2-key
 
       - name: SSH into EC2 and Deploy with ArgoCD
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ubuntu  # Change to 'ec2-user' for Amazon Linux & 
+          EC2_USER: ubuntu  # Change to 'ec2-user' for Amazon Linux 
         run: |
-          ssh -o StrictHostKeyChecking=no -i private_key.pem $EC2_USER@$EC2_HOST "argocd app sync my-app"
+          ssh -o StrictHostKeyChecking=no -i my-ec2-key $EC2_USER@$EC2_HOST "argocd app sync my-app"
