@@ -1,19 +1,54 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: my-app
+  name: my-app-blue
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: my-app
+      app: my-app-blue
   template:
     metadata:
       labels:
-        app: my-app
+        app: my-app-blue
     spec:
       containers:
         - name: my-app
-          image: nitishnandan/my-app:latest
+          image: nitishnandan/my-app:v1
           ports:
             - containerPort: 5000
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app-green
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: my-app-green
+  template:
+    metadata:
+      labels:
+        app: my-app-green
+    spec:
+      containers:
+        - name: my-app
+          image: nitishnandan/my-app:v2
+          ports:
+            - containerPort: 5000
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-service
+spec:
+  selector:
+    app: my-app-blue  # Initially routes traffic to "blue"
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000
+  type: LoadBalancer
