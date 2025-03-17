@@ -43,13 +43,22 @@ jobs:
         run: |
           sed -i "s|image: .*/my-app:.*|image: ${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}|" k8s/deployment.yaml
 
-      - name: Commit Manifest Changes
+      - name: Sync Git Changes
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          git add k8s/deployment.yaml
-          git commit -m "Update image to ${{ github.sha }}" || echo "No changes to commit"
-          git push origin main
+          
+          # Pull remote changes safely
+          git pull origin main --rebase --autostash
+          
+          # Commit only if changes exist
+          if ! git diff --quiet k8s/deployment.yaml; then
+            git add k8s/deployment.yaml
+            git commit -m "Update image to ${{ github.sha }}"
+            git push origin main --force-with-lease
+          else
+            echo "No changes to deployment.yaml"
+          fi
 
       - name: Prepare SSH Key
         run: |
@@ -78,7 +87,7 @@ jobs:
           # Install ArgoCD CLI if missing
           if ! command -v argocd >/dev/null 2>&1; then
             echo "Installing ArgoCD CLI..."
-            sudo curl -sSL -o /usr/local/bin/argocd \$ARGOCD_SERVER/download/argocd-linux-amd64
+            sudo curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
             sudo chmod +x /usr/local/bin/argocd
           fi
 
