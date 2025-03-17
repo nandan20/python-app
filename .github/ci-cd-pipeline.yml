@@ -1,0 +1,37 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Login to Docker Hub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      - name: Build Docker Image
+        run: |
+          docker build -t my-dockerhub-username/my-app:latest .
+          docker tag my-dockerhub-username/my-app:latest my-dockerhub-username/my-app:${{ github.sha }}
+
+      - name: Push Docker Image to Docker Hub
+        run: |
+          docker push my-dockerhub-username/my-app:latest
+          docker push my-dockerhub-username/my-app:${{ github.sha }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Deploy to Kubernetes using ArgoCD
+        run: |
+          argocd app sync my-app
