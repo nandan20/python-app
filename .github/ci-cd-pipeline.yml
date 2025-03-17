@@ -17,13 +17,13 @@ jobs:
 
       - name: Build Docker Image
         run: |
-          docker build -t my-dockerhub-username/my-app:latest .
-          docker tag my-dockerhub-username/my-app:latest my-dockerhub-username/my-app:${{ github.sha }}
+          docker build -t nitishnandan/my-app:latest .
+          docker tag nitishnandan/my-app:latest nitishnandan/my-app:${{ github.sha }}
 
       - name: Push Docker Image to Docker Hub
         run: |
-          docker push my-dockerhub-username/my-app:latest
-          docker push my-dockerhub-username/my-app:${{ github.sha }}
+          docker push nitishnandan/my-app:latest
+          docker push nitishnandan/my-app:${{ github.sha }}
 
   deploy:
     needs: build
