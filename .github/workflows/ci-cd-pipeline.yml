@@ -1,88 +1,58 @@
-name: CI/CD Pipeline
+deploy:
+  needs: build
+  runs-on: ubuntu-latest
+  if: github.event_name == 'push'
+  steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    - name: Update Kubernetes Deployment File
+      run: |
+        IMAGE_TAG="${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}"
+        sed -i "s|image: .*/my-app:.*|image: $IMAGE_TAG|" k8s/deployment.yaml
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
+    - name: Sync Git Changes
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        
+        git pull origin main --rebase --autostash
+        
+        if ! git diff --quiet k8s/deployment.yaml; then
+          git add k8s/deployment.yaml
+          git commit -m "Update image to ${{ github.sha }}"
+          git push origin main --force-with-lease
+        else
+          echo "No changes to deployment.yaml"
+        fi
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v2
+    - name: ArgoCD Deployment
+      env:
+        ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+        ARGOCD_USER: ${{ secrets.ARGOCD_USERNAME }}
+        ARGOCD_PASS: ${{ secrets.ARGOCD_PASSWORD }}
+      run: |
+        echo "Testing connection to ArgoCD server..."
+        if ! curl -k -I --connect-timeout 5 "$ARGOCD_SERVER"; then
+          echo "ERROR: Cannot reach ArgoCD server at $ARGOCD_SERVER"
+          exit 1
+        fi
 
-      - name: Login to Docker Hub
-        run: |
-          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+        echo "Installing ArgoCD CLI..."
+        curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+        chmod +x argocd
+        sudo mv argocd /usr/local/bin/
 
-      - name: Build and Push Docker Image
-        run: |
-          IMAGE_TAG="${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}"
-          docker build -t $IMAGE_TAG .
-          
-          if [ "$GITHUB_REF" == "refs/heads/main" ]; then
-            docker tag $IMAGE_TAG ${{ secrets.DOCKER_USERNAME }}/my-app:latest
-            docker push $IMAGE_TAG
-            docker push ${{ secrets.DOCKER_USERNAME }}/my-app:latest
-          fi
+        # Remove HTTPS for login
+        ARGOCD_HOST=$(echo $ARGOCD_SERVER | sed 's~https://~~')
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+        echo "Logging into ArgoCD with host: $ARGOCD_HOST..."
+        argocd login "$ARGOCD_HOST" \
+          --username="$ARGOCD_USER" \
+          --password="$ARGOCD_PASS" \
+          --insecure \
+          --grpc-web
 
-      - name: Update Kubernetes Deployment File
-        run: |
-          IMAGE_TAG="${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}"
-          sed -i "s|image: .*/my-app:.*|image: $IMAGE_TAG|" k8s/deployment.yaml
-
-      - name: Sync Git Changes
-        run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          
-          git pull origin main --rebase --autostash
-          
-          if ! git diff --quiet k8s/deployment.yaml; then
-            git add k8s/deployment.yaml
-            git commit -m "Update image to ${{ github.sha }}"
-            git push origin main --force-with-lease
-          else
-            echo "No changes to deployment.yaml"
-          fi
-
-      - name: ArgoCD Deployment
-        env:
-          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}  # Example: https://localhost:8080
-          ARGOCD_USER: ${{ secrets.ARGOCD_USERNAME }}
-          ARGOCD_PASS: ${{ secrets.ARGOCD_PASSWORD }}
-        run: |
-          echo "Testing connection to ArgoCD server..."
-          if ! curl -k -I --connect-timeout 5 "$ARGOCD_SERVER"; then
-            echo "ERROR: Cannot reach ArgoCD server at $ARGOCD_SERVER"
-            exit 1
-          fi
-
-          echo "Installing ArgoCD CLI..."
-          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-          chmod +x argocd
-          sudo mv argocd /usr/local/bin/
-
-          echo "Logging into ArgoCD..."
-          argocd login "$ARGOCD_SERVER" \
-            --username="$ARGOCD_USER" \
-            --password="$ARGOCD_PASS" \
-            --insecure \
-            --grpc-web
-
-          echo "Starting application sync..."
-          argocd app sync my-app --force --timeout 300 --retry-limit 5
-          argocd app wait my-app --health
+        echo "Starting application sync..."
+        argocd app sync my-app --force --timeout 300 --retry-limit 5
+        argocd app wait my-app --health
