@@ -22,13 +22,13 @@ jobs:
 
       - name: Build and Push Docker Image
         run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/my-app:latest .
-          docker tag ${{ secrets.DOCKER_USERNAME }}/my-app:latest ${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}
+          IMAGE_TAG="${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}"
+          docker build -t $IMAGE_TAG .
           
-          # Push only for main branch commits
           if [ "$GITHUB_REF" == "refs/heads/main" ]; then
+            docker tag $IMAGE_TAG ${{ secrets.DOCKER_USERNAME }}/my-app:latest
+            docker push $IMAGE_TAG
             docker push ${{ secrets.DOCKER_USERNAME }}/my-app:latest
-            docker push ${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}
           fi
 
   deploy:
@@ -39,19 +39,18 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Update K8s Manifest
+      - name: Update Kubernetes Deployment File
         run: |
-          sed -i "s|image: .*/my-app:.*|image: ${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}|" k8s/deployment.yaml
+          IMAGE_TAG="${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}"
+          sed -i "s|image: .*/my-app:.*|image: $IMAGE_TAG|" k8s/deployment.yaml
 
       - name: Sync Git Changes
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           
-          # Pull remote changes safely
           git pull origin main --rebase --autostash
           
-          # Commit only if changes exist
           if ! git diff --quiet k8s/deployment.yaml; then
             git add k8s/deployment.yaml
             git commit -m "Update image to ${{ github.sha }}"
@@ -60,54 +59,30 @@ jobs:
             echo "No changes to deployment.yaml"
           fi
 
-      - name: Prepare SSH Key
-        run: |
-          # Convert SSH key to UNIX format
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > my-ec2-key
-          chmod 600 my-ec2-key
-
       - name: ArgoCD Deployment
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ubuntu
-          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}  # Should be https://host:port
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}  # Example: https://localhost:8080
           ARGOCD_USER: ${{ secrets.ARGOCD_USERNAME }}
           ARGOCD_PASS: ${{ secrets.ARGOCD_PASSWORD }}
         run: |
-          ssh -i my-ec2-key -T -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << EOSSH
-          #!/bin/bash
-
-          # Validate environment variables
-          echo "ARGOCD_SERVER: ${ARGOCD_SERVER:?ERROR: ARGOCD_SERVER env var not set}"
-
-          # Verify network connectivity
           echo "Testing connection to ArgoCD server..."
-          if ! curl -k -I --connect-timeout 5 "\$ARGOCD_SERVER"; then
-            echo "ERROR: Cannot reach ArgoCD server at \$ARGOCD_SERVER"
+          if ! curl -k -I --connect-timeout 5 "$ARGOCD_SERVER"; then
+            echo "ERROR: Cannot reach ArgoCD server at $ARGOCD_SERVER"
             exit 1
           fi
 
-          # Install ArgoCD CLI if missing
-          if ! command -v argocd >/dev/null; then
-            curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-            chmod +x argocd
-            sudo mv argocd /usr/local/bin/
-          fi
+          echo "Installing ArgoCD CLI..."
+          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x argocd
+          sudo mv argocd /usr/local/bin/
 
-          # Login with force-confirm and web transport
-          argocd login "\$ARGOCD_SERVER" \\
-            --username="\$ARGOCD_USER" \\
-            --password="\$ARGOCD_PASS" \\
-            --insecure \\
+          echo "Logging into ArgoCD..."
+          argocd login "$ARGOCD_SERVER" \
+            --username="$ARGOCD_USER" \
+            --password="$ARGOCD_PASS" \
+            --insecure \
             --grpc-web
 
-          # Force sync application with timeout
-          echo "Starting sync operation..."
-          argocd app sync my-app \\
-            --force \\
-            --timeout 300 \\
-            --retry-limit 5
-
-          # Verify sync status
+          echo "Starting application sync..."
+          argocd app sync my-app --force --timeout 300 --retry-limit 5
           argocd app wait my-app --health
-          EOSSH
