@@ -54,7 +54,7 @@ jobs:
 
           if ! git diff --quiet k8s/deployment.yaml; then
             git add k8s/deployment.yaml
-            git commit -m "Update image to $IMAGE_TAG"  # More descriptive message
+            git commit -m "Update image to $IMAGE_TAG"
             git push origin main --force-with-lease
           else
             echo "No changes to deployment.yaml"
@@ -62,7 +62,7 @@ jobs:
 
       - name: ArgoCD Deployment
         env:
-          ARGOCD_SERVER: "${{ secrets.ARGOCD_SERVER }}"  # Example ngrok URL
+          ARGOCD_SERVER: "https://c771-2401-4900-1cb8-a939-a4ef-1383-6429-f4e7.ngrok-free.app:443"  # Explicitly include port 443
           ARGOCD_USER: "${{ secrets.ARGOCD_USERNAME }}"
           ARGOCD_PASS: "${{ secrets.ARGOCD_PASSWORD }}"
         run: |
@@ -76,9 +76,12 @@ jobs:
             exit 1
           fi
 
-          # Extract the host from the URL
+          # Extract the host from the URL (including port)
           ARGOCD_HOST=$(echo "$ARGOCD_SERVER" | awk -F[/:] '{print $4}')
+          ARGOCD_PORT=$(echo "$ARGOCD_SERVER" | awk -F[/:] '{print $5}')
+          
           echo "Extracted ArgoCD Host: $ARGOCD_HOST"
+          echo "Extracted Port: $ARGOCD_PORT"
 
           # Validate domain resolution
           if ! nslookup "$ARGOCD_HOST"; then
@@ -86,7 +89,7 @@ jobs:
             exit 1
           fi
 
-          # Check if ArgoCD is reachable
+          # Check if ArgoCD is reachable on port 443 (HTTPS)
           if ! curl -k -I --connect-timeout 10 "$ARGOCD_SERVER"; then
             echo "ERROR: Cannot reach ArgoCD server at $ARGOCD_SERVER"
             exit 1
