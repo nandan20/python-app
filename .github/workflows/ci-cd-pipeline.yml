@@ -22,6 +22,7 @@ jobs:
 
       - name: Build and Push Docker Image
         run: |
+          set -e  # Exit on error
           IMAGE_TAG="${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}"
           docker build -t $IMAGE_TAG .
           
@@ -53,7 +54,7 @@ jobs:
 
           if ! git diff --quiet k8s/deployment.yaml; then
             git add k8s/deployment.yaml
-            git commit -m "Update image to ${{ github.sha }}"
+            git commit -m "Update image to $IMAGE_TAG"  # More descriptive message
             git push origin main --force-with-lease
           else
             echo "No changes to deployment.yaml"
@@ -61,7 +62,7 @@ jobs:
 
       - name: ArgoCD Deployment
         env:
-          ARGOCD_SERVER: "${{ secrets.ARGOCD_SERVER }}"  # Example: https://argo.example.com:443
+          ARGOCD_SERVER: "${{ secrets.ARGOCD_SERVER }}"  # Example ngrok URL
           ARGOCD_USER: "${{ secrets.ARGOCD_USERNAME }}"
           ARGOCD_PASS: "${{ secrets.ARGOCD_PASSWORD }}"
         run: |
@@ -96,6 +97,12 @@ jobs:
           chmod +x argocd
           sudo mv argocd /usr/local/bin/
 
+          # Verify installation of ArgoCD CLI
+          if ! command -v argocd &> /dev/null; then
+            echo "ERROR: ArgoCD CLI installation failed."
+            exit 1
+          fi
+
           echo "Logging into ArgoCD..."
           argocd login "$ARGOCD_SERVER" \
             --username="$ARGOCD_USER" \
@@ -103,5 +110,6 @@ jobs:
             --insecure --grpc-web
 
           echo "Starting application sync..."
-          argocd app sync my-app --force --timeout 300 --retry-limit 5 --grpc-web
-          argocd app wait my-app --health --grpc-web
+          argocd app sync my-app --force --timeout 300 --retry-limit 5 --grpc-web || { echo 'Sync failed'; exit 1; }
+          
+          argocd app wait my-app --health --grpc-web || { echo 'Wait for health check failed'; exit 1; }
