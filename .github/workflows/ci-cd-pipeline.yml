@@ -62,36 +62,23 @@ jobs:
 
       - name: ArgoCD Deployment
         env:
-          ARGOCD_SERVER: "https://c771-2401-4900-1cb8-a939-a4ef-1383-6429-f4e7.ngrok-free.app:443"  # Explicitly include port 443
+          ARGOCD_SERVER: "c771-2401-4900-1cb8-a939-a4ef-1383-6429-f4e7.ngrok-free.app"  # Remove https:// and add port in commands below
           ARGOCD_USER: "${{ secrets.ARGOCD_USERNAME }}"
           ARGOCD_PASS: "${{ secrets.ARGOCD_PASSWORD }}"
         run: |
           set -e  # Exit on error
 
-          echo "Using ArgoCD Server: $ARGOCD_SERVER"
+          echo "Using ArgoCD Server: https://$ARGOCD_SERVER"
 
-          # Validate ArgoCD server URL
-          if [[ ! "$ARGOCD_SERVER" =~ ^https?:// ]]; then
-            echo "ERROR: ARGOCD_SERVER must start with 'http://' or 'https://'"
-            exit 1
-          fi
-
-          # Extract the host from the URL (including port)
-          ARGOCD_HOST=$(echo "$ARGOCD_SERVER" | awk -F[/:] '{print $4}')
-          ARGOCD_PORT=$(echo "$ARGOCD_SERVER" | awk -F[/:] '{print $5}')
-          
-          echo "Extracted ArgoCD Host: $ARGOCD_HOST"
-          echo "Extracted Port: $ARGOCD_PORT"
-
-          # Validate domain resolution
-          if ! nslookup "$ARGOCD_HOST"; then
-            echo "ERROR: Unable to resolve ArgoCD host $ARGOCD_HOST"
+          # Validate ArgoCD server URL format (without protocol)
+          if [[ ! "$ARGOCD_SERVER" =~ ^[a-zA-Z0-9.-]+$ ]]; then
+            echo "ERROR: ARGOCD_SERVER must be a valid hostname."
             exit 1
           fi
 
           # Check if ArgoCD is reachable on port 443 (HTTPS)
-          if ! curl -k -I --connect-timeout 10 "$ARGOCD_SERVER"; then
-            echo "ERROR: Cannot reach ArgoCD server at $ARGOCD_SERVER"
+          if ! curl -k -I --connect-timeout 10 "https://$ARGOCD_SERVER:443"; then
+            echo "ERROR: Cannot reach ArgoCD server at https://$ARGOCD_SERVER"
             exit 1
           fi
 
