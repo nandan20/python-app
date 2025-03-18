@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: my-app
-          image: nitishnandan/my-app:d26abbc2e7028fc80946cd2733486944a8499d6f
+          image: nitishnandan/my-app:c40fd4c923e3805bd71632a833ce37eb843f7472
           ports:
             - containerPort: 5000
 
@@ -35,7 +35,7 @@ spec:
     spec:
       containers:
         - name: my-app
-          image: nitishnandan/my-app:d26abbc2e7028fc80946cd2733486944a8499d6f
+          image: nitishnandan/my-app:c40fd4c923e3805bd71632a833ce37eb843f7472
           ports:
             - containerPort: 5000
 
