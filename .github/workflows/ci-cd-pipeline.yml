@@ -61,21 +61,31 @@ jobs:
 
       - name: ArgoCD Deployment
         env:
-          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}  # Example: https://your-argo-server.com
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}  # Example: https://argo.example.com
           ARGOCD_USER: ${{ secrets.ARGOCD_USERNAME }}
           ARGOCD_PASS: ${{ secrets.ARGOCD_PASSWORD }}
         run: |
-          set -e  # Exit immediately if a command fails
+          set -e  # Exit on error
 
-          echo "Testing connection to ArgoCD server..."
           echo "Using ArgoCD Server: $ARGOCD_SERVER"
 
-          # Validate ARGOCD_SERVER URL
+          # Validate ArgoCD server URL
           if [[ ! "$ARGOCD_SERVER" =~ ^https?:// ]]; then
             echo "ERROR: ARGOCD_SERVER must start with 'http://' or 'https://'"
             exit 1
           fi
 
+          # Extract the host from the URL
+          ARGOCD_HOST=$(echo "$ARGOCD_SERVER" | awk -F[/:] '{print $4}')
+          echo "Extracted ArgoCD Host: $ARGOCD_HOST"
+
+          # Validate domain resolution
+          if ! nslookup "$ARGOCD_HOST"; then
+            echo "ERROR: Unable to resolve ArgoCD host $ARGOCD_HOST"
+            exit 1
+          fi
+
+          # Check if ArgoCD is reachable
           if ! curl -k -I --connect-timeout 10 "$ARGOCD_SERVER"; then
             echo "ERROR: Cannot reach ArgoCD server at $ARGOCD_SERVER"
             exit 1
@@ -90,7 +100,7 @@ jobs:
           argocd login "$ARGOCD_SERVER" \
             --username="$ARGOCD_USER" \
             --password="$ARGOCD_PASS" \
-            --insecure --plaintext
+            --insecure --grpc-web
 
           echo "Starting application sync..."
           argocd app sync my-app --force --timeout 300 --retry-limit 5
