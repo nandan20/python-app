@@ -1,107 +1,67 @@
-name: CI/CD Pipeline
+name: Deploy to Minikube via ArgoCD
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io  # Change to your registry (e.g., docker.io, ghcr.io, ECR)
+  IMAGE_NAME: my-app
+  ARGOCD_SERVER: "https://1f89-2401-4900-1cb8-a939-a4ef-1383-6429-f4e7.ngrok-free.app:443"
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Login to Docker Hub
-        run: |
-          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-
-      - name: Build and Push Docker Image
-        run: |
-          IMAGE_TAG="${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}"
-          docker build -t $IMAGE_TAG .
-          
-          if [ "$GITHUB_REF" == "refs/heads/main" ]; then
-            docker tag $IMAGE_TAG ${{ secrets.DOCKER_USERNAME }}/my-app:latest
-            docker push $IMAGE_TAG
-            docker push ${{ secrets.DOCKER_USERNAME }}/my-app:latest
-          fi
-
   deploy:
-    needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Update Kubernetes Deployment File
+      - name: Log in to Container Registry
+        run: echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login $REGISTRY -u ${{ secrets.REGISTRY_USERNAME }} --password-stdin
+
+      - name: Build and tag Docker image
         run: |
-          IMAGE_TAG="${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}"
-          sed -i "s|image: .*/my-app:.*|image: $IMAGE_TAG|" k8s/deployment.yaml
+          docker build -t $REGISTRY/${{ secrets.REGISTRY_USERNAME }}/$IMAGE_NAME:latest .
+          docker tag $REGISTRY/${{ secrets.REGISTRY_USERNAME }}/$IMAGE_NAME:latest $REGISTRY/${{ secrets.REGISTRY_USERNAME }}/$IMAGE_NAME:${{ github.sha }}
 
-      - name: Sync Git Changes
+      - name: Push Docker image to registry
         run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          
-          git pull origin main --rebase --autostash
-          
-          if ! git diff --quiet k8s/deployment.yaml; then
-            git add k8s/deployment.yaml
-            git commit -m "Update image to ${{ github.sha }}"
-            git push origin main --force-with-lease
-          else
-            echo "No changes to deployment.yaml"
-          fi
+          docker push $REGISTRY/${{ secrets.REGISTRY_USERNAME }}/$IMAGE_NAME:latest
+          docker push $REGISTRY/${{ secrets.REGISTRY_USERNAME }}/$IMAGE_NAME:${{ github.sha }}
 
-      - name: ArgoCD Deployment
-        env:
-          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}  # Example: https://argo.example.com
-          ARGOCD_USER: ${{ secrets.ARGOCD_USERNAME }}
-          ARGOCD_PASS: ${{ secrets.ARGOCD_PASSWORD }}
+      - name: Install ArgoCD CLI
         run: |
-          set -e  # Exit on error
+          curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x argocd-linux-amd64
+          sudo mv argocd-linux-amd64 /usr/local/bin/argocd
 
-          echo "Using ArgoCD Server: $ARGOCD_SERVER"
-
-          # Validate ArgoCD server URL
-          if [[ ! "$ARGOCD_SERVER" =~ ^https?:// ]]; then
-            echo "ERROR: ARGOCD_SERVER must start with 'http://' or 'https://'"
-            exit 1
-          fi
-
-          # Extract the host from the URL
-          ARGOCD_HOST=$(echo "$ARGOCD_SERVER" | awk -F[/:] '{print $4}')
-          echo "Extracted ArgoCD Host: $ARGOCD_HOST"
-
-          # Validate domain resolution
-          if ! nslookup "$ARGOCD_HOST"; then
-            echo "ERROR: Unable to resolve ArgoCD host $ARGOCD_HOST"
-            exit 1
-          fi
-
-          # Check if ArgoCD is reachable
+      - name: Validate ArgoCD Connectivity
+        run: |
+          echo "Checking connectivity to ArgoCD Server..."
           if ! curl -k -I --connect-timeout 10 "$ARGOCD_SERVER"; then
             echo "ERROR: Cannot reach ArgoCD server at $ARGOCD_SERVER"
             exit 1
           fi
 
-          echo "Installing ArgoCD CLI..."
-          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-          chmod +x argocd
-          sudo mv argocd /usr/local/bin/
-
-          echo "Logging into ArgoCD..."
+      - name: Log in to ArgoCD
+        run: |
           argocd login "$ARGOCD_SERVER" \
-            --username="$ARGOCD_USER" \
-            --password="$ARGOCD_PASS" \
+            --username="${{ secrets.ARGOCD_USER }}" \
+            --password="${{ secrets.ARGOCD_PASSWORD }}" \
             --insecure --grpc-web
 
-          echo "Starting application sync..."
-          argocd app sync my-app --force --timeout 300 --retry-limit 5
-          argocd app wait my-app --health
+      - name: Update ArgoCD application with new image
+        run: |
+          argocd app set my-argocd-app \
+            --parameter "image.tag=${{ github.sha }}" \
+            --parameter "image.repository=$REGISTRY/${{ secrets.REGISTRY_USERNAME }}/$IMAGE_NAME"
+
+      - name: Sync and Deploy via ArgoCD
+        run: |
+          argocd app sync my-argocd-app --prune --grpc-web
+
+      - name: Check Deployment Status
+        run: |
+          argocd app wait my-argocd-app --timeout 300 --grpc-web
