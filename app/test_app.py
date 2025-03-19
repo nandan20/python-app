@@ -1,11 +1,9 @@
 import sys
 import os
+from app.server import app  # This import must be at the top
 
-sys.path.insert(
-    0, os.path.abspath(os.path.dirname(__file__) + "/..")
-)  # ✅ Still before any imports
-
-from app.server import app  # ✅ Now correctly placed after sys.path modification
+# Ensure the app/ directory is in the sys.path
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__) + "/.."))
 
 
 def test_home():
