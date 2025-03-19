@@ -32,8 +32,60 @@ jobs:
             docker push ${{ secrets.DOCKER_USERNAME }}/my-app:latest
           fi
 
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Install Flake8
+        run: pip install flake8
+
+      - name: Run Flake8 Linting
+        run: flake8 app/ --max-line-length=100
+
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Install Dependencies
+        run: pip install -r app/requirements.txt pytest
+
+      - name: Run Unit Tests
+        run: pytest app/
+
+  sonarcloud:
+    runs-on: ubuntu-latest
+    needs: [build, lint, test]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v2
+        with:
+          projectBaseDir: .
+          args: >
+            -Dsonar.organization=${{ secrets.SONAR_ORG }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT }}
+            -Dsonar.host.url=https://sonarcloud.io
+            -Dsonar.token=${{ secrets.SONAR_TOKEN }}
+
   deploy:
-    needs: build
+    needs: [sonarcloud]
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
     steps:
@@ -62,7 +114,7 @@ jobs:
 
       - name: ArgoCD Deployment
         env:
-          ARGOCD_SERVER: "c771-2401-4900-1cb8-a939-a4ef-1383-6429-f4e7.ngrok-free.app"  # Remove https:// and add port in commands below
+          ARGOCD_SERVER: "c771-2401-4900-1cb8-a939-a4ef-1383-6429-f4e7.ngrok-free.app"
           ARGOCD_USER: "${{ secrets.ARGOCD_USERNAME }}"
           ARGOCD_PASS: "${{ secrets.ARGOCD_PASSWORD }}"
         run: |
@@ -70,15 +122,13 @@ jobs:
 
           echo "Using ArgoCD Server: https://$ARGOCD_SERVER"
 
-          # Validate ArgoCD server URL format (without protocol)
           if [[ ! "$ARGOCD_SERVER" =~ ^[a-zA-Z0-9.-]+$ ]]; then
-            echo "ERROR: ARGOCD_SERVER must be a valid hostname."
+            echo "ERROR: Invalid ArgoCD Server format."
             exit 1
           fi
 
-          # Check if ArgoCD is reachable on port 443 (HTTPS)
           if ! curl -k -I --connect-timeout 10 "https://$ARGOCD_SERVER:443"; then
-            echo "ERROR: Cannot reach ArgoCD server at https://$ARGOCD_SERVER"
+            echo "ERROR: Cannot reach ArgoCD server."
             exit 1
           fi
 
@@ -87,7 +137,6 @@ jobs:
           chmod +x argocd
           sudo mv argocd /usr/local/bin/
 
-          # Verify installation of ArgoCD CLI
           if ! command -v argocd &> /dev/null; then
             echo "ERROR: ArgoCD CLI installation failed."
             exit 1
@@ -99,7 +148,7 @@ jobs:
             --password="$ARGOCD_PASS" \
             --insecure --grpc-web
 
-          echo "Starting application sync..."
+          echo "Syncing application with ArgoCD..."
           argocd app sync my-app --force --timeout 300 --retry-limit 5 --grpc-web || { echo 'Sync failed'; exit 1; }
           
           argocd app wait my-app --health --grpc-web || { echo 'Wait for health check failed'; exit 1; }
