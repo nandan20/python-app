@@ -5,6 +5,7 @@ metadata:
 spec:
   selector:
     app: my-app
+    version: blue  # Change to green during deployment switch
   ports:
     - protocol: TCP
       port: 80
