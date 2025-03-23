@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO)
 @app.route("/")
 def hello():
     app.logger.info(f"Received request from {request.remote_addr} to {request.path}")
-    return "Hello, World!-Test"
+    return "Hello, World!"
 
 
 if __name__ == "__main__":
