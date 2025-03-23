@@ -115,7 +115,7 @@ jobs:
 
       - name: ArgoCD Deployment
         env:
-          ARGOCD_SERVER: "94d6-2001-420-c0e0-1005-00-6c3.ngrok-free.app"
+          ARGOCD_SERVER: "8545-2001-420-c0e0-1004-00-c9.ngrok-free.app"
           ARGOCD_USER: "${{ secrets.ARGOCD_USERNAME }}"
           ARGOCD_PASS: "${{ secrets.ARGOCD_PASSWORD }}"
         run: |
